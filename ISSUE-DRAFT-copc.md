@@ -35,9 +35,13 @@ and in published `copc@0.0.8`.
 Repro repo: **https://github.com/dsmithn/copc-decompressfile-leak** — two harnesses, both ~30 seconds.
 
 **Node**, counting the allocator directly (`malloc` bytes minus `free` bytes)
-rather than heap size, so allocator growth policy can't explain the result. Arm A
-is the real `Las.PointData.decompressFile`; arm B is a local reimplementation of
-the same routine with the two `_free` calls added.
+rather than heap size, so allocator growth policy can't explain the result. Two
+arms:
+
+- **Arm A — upstream.** Calls the real exported `Las.PointData.decompressFile`.
+  This is the arm the leak measurement rests on.
+- **Arm B — control.** A local reimplementation of the same routine with the two
+  `_free` calls added, to show the frees are what closes the gap.
 
 Fixture is a real tile — `ept-data/4-8-6-7.laz` from the public USGS 3DEP
 collection `NC_Phase5_Yancey_2017`, 289,466 B / 39,207 points — i.e. exactly what
@@ -133,7 +137,7 @@ not read laz-perf's destructor and cannot say whether it dereferences the buffer
 so this is a conservative ordering rather than a bug report about
 `decompressChunk`.
 
-`dataPointer` is a `pointDataRecordLength` scratch buffer (36 B for this file)
+`dataPointer` is a `pointDataRecordLength` scratch buffer (29 B for this file)
 that each point is copied _out_ of into `outBuffer`, so nothing in the returned
 data aliases either allocation — freeing them cannot affect the return value.
 Confirmed by the harness asserting byte-identical output.
@@ -149,16 +153,16 @@ Confirmed by the harness asserting byte-identical output.
   (`modules/las/src/lib/copc/parse-las.ts`) and `Giro3D`
   (`src/sources/las/worker.ts`, `LASSource.ts`, `PotreeSource.ts`) call
   `decompressFile` too, but were confirmed by reading source only.
-- The largest fixture actually run was 5,894 bytes. Real EPT nodes are
-  ~200 KB–1 MB; the leak is proportional to input, but that regime is arithmetic
-  here, not measurement.
+- The browser arm ran on a 5,894 B fixture — only the Node harness exercised a
+  real ~289 KB EPT node. Nodes in the wild run ~200 KB–1 MB; above that range the
+  proportionality is arithmetic, not measurement.
 - We did not run Potree itself to a crash — only the mechanism and the
   accumulation are demonstrated there. The crash above was a different consumer.
-- The "with the two `_free` calls" arm in the Node harness is a local
-  reimplementation of the routine, not the exported function — worth eyeballing
-  against `point-data.ts`. The *leak* measurement does not depend on it: that arm
-  calls the real `Las.PointData.decompressFile`. The patched-upstream run above
-  also exercises the real function.
+- Arm B (the control, with the frees) is a local reimplementation, not the
+  exported function — worth eyeballing against `point-data.ts`. The _leak_
+  measurement does not depend on it; that rests on Arm A, which calls the real
+  `Las.PointData.decompressFile`. The patched-upstream run above also exercises
+  the real function.
 - The 0-leak result for `decompressChunk` covers the path our harness exercises.
   It is not a claim that COPC ingestion is leak-free in general.
 
