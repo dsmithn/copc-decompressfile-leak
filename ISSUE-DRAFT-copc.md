@@ -155,9 +155,9 @@ Confirmed by the harness asserting byte-identical output.
 
 Node harness: `copc@0.0.8`, `laz-perf@0.0.6`, Node v26.3.0, macOS 26.5.2 arm64.
 Browser harness: `potree@1.8.0`, Chrome 150.0.7871.187, same machine.
-The iPhone runs are from a separate application; I did not record the device
-model or iOS version at the time, so treat those figures as illustrative of
-scale rather than as a reproducible case.
+The iPhone runs are from a separate application, on an iPhone 14 Pro
+(`iPhone15,2`). I did not record the iOS version at the time of those runs, so
+treat the durations as illustrative of scale rather than as a reproducible case.
 
 ## What we did not verify
 
