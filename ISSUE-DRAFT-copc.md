@@ -153,7 +153,11 @@ Confirmed by the harness asserting byte-identical output.
 
 ## Environment
 
-`copc@0.0.8`, `laz-perf@0.0.6`, `potree@1.8.0`, Node v26.3.0, Chrome stable.
+Node harness: `copc@0.0.8`, `laz-perf@0.0.6`, Node v26.3.0, macOS 26.5.2 arm64.
+Browser harness: `potree@1.8.0`, Chrome 150.0.7871.187, same machine.
+The iPhone runs are from a separate application; I did not record the device
+model or iOS version at the time, so treat those figures as illustrative of
+scale rather than as a reproducible case.
 
 ## What we did not verify
 
