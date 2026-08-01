@@ -51,9 +51,10 @@ per call: 289495 B leaked vs 289466 B input
           (difference 29 B = pointDataRecordLength, the second _malloc)
 ```
 
-**200 decodes of this tile leak 57.9 MB.** The per-call figure is the input buffer plus one
-point record, to within 29 bytes — exactly the two allocations, and not something
-an allocator growth policy produces. Both arms decode byte-identical point data
+**200 decodes of this tile leak 57.9 MB.** The per-call figure is exactly the two
+allocations: 289,466 + 29 = 289,495 bytes, the input buffer plus one point
+record, with nothing unaccounted for. An allocator growth policy does not
+produce 400 mallocs and 0 frees. Both arms decode byte-identical point data
 (asserted), so adding the frees changes nothing but the leak.
 
 **Browser**, driving Potree 1.8's own bundled copc build and its own decoder
@@ -74,9 +75,9 @@ behaves the same way.
 At 289 KB/tile that is ~7,400 decodes to a 2 GiB WASM ceiling (Emscripten's
 default growth limit for such builds), and ~5,570 to the 1,574,226 KiB the
 kernel recorded at the mobile kill below — a zero-baseline figure, since that
-number is total process RSS which this leak contributes to rather than fills. **We did not run
-Potree itself to failure**, so for any given viewer session that ceiling is
-arithmetic from the measured per-call figure, not an observed crash.
+number is total process RSS which this leak contributes to rather than fills.
+Both figures are arithmetic from the measured per-call leak, not observed
+crashes — **no Potree session was run to a memory ceiling.**
 
 What we did observe, in **a different consumer of this same call path — not
 Potree**: a production viewer streaming USGS 3DEP EPT tiles died reproducibly on
