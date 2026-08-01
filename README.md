@@ -1,5 +1,13 @@
 # `copc.js` — `Las.PointData.decompressFile` never frees its two WASM allocations
 
+> **Status:** reported upstream as
+> [connormanning/copc.js#16](https://github.com/connormanning/copc.js/issues/16),
+> and to Potree — which vendors its own copy of the library — as
+> [potree/potree#1571](https://github.com/potree/potree/issues/1571).
+>
+> A write-up of how this was found is at
+> **<https://dsmithn.github.io/copc-decompressfile-leak/>**.
+
 `decompressFile` calls `_malloc` twice and its `finally` block only calls
 `reader.delete()`. Its sibling `decompressChunk`, thirty lines above, frees
 both. Every call therefore leaks `file.byteLength + pointDataRecordLength`

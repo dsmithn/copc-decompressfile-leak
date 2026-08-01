@@ -1,3 +1,5 @@
+<!-- Filed as https://github.com/potree/potree/issues/1571 — this file is the body as submitted. -->
+
 Loading EPT data leaks WebAssembly memory on every decoded node. Loading COPC
 does not. The cause is in the bundled `libs/copc/index.js`, so it does not go
 away when copc.js publishes a fix — the vendored copy has to be updated.

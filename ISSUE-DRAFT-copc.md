@@ -1,3 +1,5 @@
+<!-- Filed as https://github.com/connormanning/copc.js/issues/16 — this file is the body as submitted. -->
+
 `decompressFile` allocates two buffers and frees neither. `decompressChunk`, in
 the same file, frees both.
 
