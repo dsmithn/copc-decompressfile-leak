@@ -1,0 +1,17 @@
+{
+  "name": "copc-decompressfile-leak-repro",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Reproduction: copc.js Las.PointData.decompressFile never frees its two WASM allocations",
+  "scripts": {
+    "repro:node": "node node/copc-leak-repro.cjs ept-node-real.laz 200",
+    "repro:node:small": "node node/copc-leak-repro.cjs node.laz 2000"
+  },
+  "dependencies": {
+    "copc": "0.0.8",
+    "laz-perf": "0.0.6"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}

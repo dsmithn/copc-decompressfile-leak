@@ -1,0 +1,97 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>copc.js decompressFile leak — reproduced in Potree</title>
+<pre id="out">running…</pre>
+<script>
+  const out = document.getElementById("out");
+  const log = (s) => {
+    out.textContent += `${s}\n`;
+  };
+
+  // A FRESH worker per arm: copc caches its lazPerf at module scope, so two
+  // arms in one worker would share a heap and the second would inherit the
+  // first's leak.
+  function arm(opts) {
+    return new Promise((resolve, reject) => {
+      const w = new Worker("/leakrepro/worker.js");
+      w.onerror = (e) => reject(new Error(`${opts.arm}: ${e.message}`));
+      w.onmessage = (e) => {
+        w.terminate();
+        // The worker reports its own throws as data (an async onmessage
+        // rejection never reaches onerror), so surface them rather than
+        // resolving with an undefined-shaped result.
+        if (e.data && e.data.error)
+          reject(new Error(`${opts.arm}: ${e.data.error}`));
+        else resolve(e.data);
+      };
+      w.postMessage(opts);
+    });
+  }
+
+  const MB = (b) => (b / 1048576).toFixed(2);
+
+  (async () => {
+    out.textContent = "";
+    const q = new URLSearchParams(location.search);
+    const N = Number(q.get("n") || 2000);
+    const WARMUP = Number(q.get("warmup") || 50);
+    const url = "/leakrepro/node.laz";
+
+    const file = await arm({ url, iterations: N, warmup: WARMUP, arm: "file" });
+    const chunk = await arm({
+      url,
+      iterations: N,
+      warmup: WARMUP,
+      arm: "chunk",
+    });
+
+    const label = (r) =>
+      r.arm === "file"
+        ? "decompressFile  (EPT path)"
+        : "decompressChunk (COPC path)";
+
+    log(`fixture /leakrepro/node.laz   iterations ${N}   warmup ${WARMUP}\n`);
+    log("PRIMARY — outstanding wasm allocations (malloc bytes not freed):\n");
+    for (const r of [file, chunk]) {
+      log(
+        `  ${label(r).padEnd(28)} leaked ${String(r.outstandingLeaked).padStart(10)} B` +
+          `   mallocs ${String(r.mallocs).padStart(5)}  frees ${String(r.frees).padStart(5)}` +
+          `   fed ${String(r.fed).padStart(9)} B   decoded ${r.decodes}/${r.iterations}`,
+      );
+    }
+
+    log("\nSECONDARY — committed heap capacity (corroboration only):\n");
+    for (const r of [file, chunk]) {
+      log(
+        `  ${label(r).padEnd(28)} ${MB(r.heapBefore)} -> ${MB(r.heapAfter)} MB` +
+          `   grew ${String(r.heapAfter - r.heapBefore).padStart(10)} B`,
+      );
+    }
+
+    // Per-call leak should equal the input this arm actually decoded, plus one
+    // pointDataRecordLength. Stated in raw bytes — a toFixed'd "0.00 MB" could
+    // hide 100 KB, and wasm grows in 64 KB pages, so an exact zero says far more.
+    const perCall = file.outstandingLeaked / file.iterations;
+    const perCallInput = file.fed / file.iterations;
+    log(
+      `\nleaking arm: ${perCall.toFixed(1)} B leaked per call vs ${perCallInput.toFixed(1)} B decoded per call` +
+        `  (ratio ${(perCall / perCallInput).toFixed(4)})`,
+    );
+    log(
+      `control arm: ${chunk.outstandingLeaked} B leaked, ${chunk.mallocs} mallocs / ${chunk.frees} frees`,
+    );
+
+    const verdict =
+      chunk.outstandingLeaked === 0 &&
+      file.outstandingLeaked > 0 &&
+      file.mallocs > 0 &&
+      file.frees === 0
+        ? "LEAK REPRODUCED IN POTREE — control frees every allocation, EPT path frees none"
+        : "INCONCLUSIVE — read the numbers above, do not trust this line";
+    log(`\nVERDICT: ${verdict}`);
+    window.__done = { file, chunk, verdict };
+  })().catch((e) => {
+    log(`ERROR: ${e.message}`);
+    window.__done = { error: e.message };
+  });
+</script>
