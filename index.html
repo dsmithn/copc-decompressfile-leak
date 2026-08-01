@@ -327,7 +327,7 @@
       <p style="font-size: 0.85rem">
         <a href="https://github.com/dsmithn/copc-decompressfile-leak">Reproduction repository</a>
         ·
-        <a href="https://github.com/connormanning/copc.js/blob/dd667453809a76e5b885859782d1cbdeaf0501ec/src/las/point-data.ts#L36-L57">the function, pinned at <code>dd66745</code></a>
+        <a href="https://github.com/connormanning/copc.js/blob/dd667453809a76e5b885859782d1cbdeaf0501ec/src/las/point-data.ts#L68-L102">the function, pinned at <code>dd66745</code></a>
       </p>
 
       <div class="confront">
@@ -526,7 +526,7 @@ per call: 289,495 B leaked vs 289,466 B input
           >
           Scaling it further is arithmetic, not measurement, and it assumes the
           leak is the only thing consuming the budget: about 7,400 decodes to
-          reach the 2&nbsp;GiB growth limit Emscripten builds use by default, or about 5,570 to reach the 1,574,226&nbsp;KiB the kernel recorded above. That
+          reach the 2&nbsp;GiB growth limit Emscripten builds use by default, or about 5,570 to reach the 1,574,226&nbsp;KiB (1.50&nbsp;GiB) the kernel recorded above. That
           second figure is a zero-baseline number. The 1.5&nbsp;GB is total
           process RSS, which the leak contributes to rather than fills on its
           own, so a real session crosses it sooner.

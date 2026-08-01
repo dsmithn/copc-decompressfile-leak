@@ -1,7 +1,7 @@
 <!-- Filed as https://github.com/potree/potree/issues/1571 — this file is the body as submitted. -->
 
-Loading EPT data leaks WebAssembly memory on every decoded node. Loading COPC
-does not. The cause is in the bundled `libs/copc/index.js`, so it does not go
+Loading EPT data leaks WebAssembly memory on every decoded node. The COPC
+path, on the successful path exercised here, does not. The cause is in the bundled `libs/copc/index.js`, so it does not go
 away when copc.js publishes a fix — the vendored copy has to be updated.
 
 ## Where
@@ -10,13 +10,14 @@ away when copc.js publishes a fix — the vendored copy has to be updated.
 
 ```js
 const buffer = isFullFile
-    ? await Copc.Las.PointData.decompressFile(u)      // EPT — leaks
-    : await Copc.Las.PointData.decompressChunk(...)   // COPC — does not
+    ? await Copc.Las.PointData.decompressFile(u)      // EPT — never frees
+    : await Copc.Las.PointData.decompressChunk(...)   // COPC — frees both
 ```
 
 In the bundled build currently on `develop`, `decompressChunk` frees its two
 WASM allocations and `decompressFile` frees neither (deminified from
-`libs/copc/index.js`):
+`libs/copc/index.js`). The measurements further down were taken against the
+`potree@1.8.0` bundle; both carry the same two functions:
 
 ```js
 // decompressChunk
@@ -69,8 +70,10 @@ lands a fix — no build artifacts committed, no formatter run.
   treat this as confirmation that the leak occurs on a real Potree call path
   rather than as a controlled comparison. The controlled comparison is the Node
   harness in the linked repo.
-- The 0-leak result for the COPC path covers only the path the harness
-  exercises. It is not a claim that COPC ingestion is leak-free in general.
+- The 0-leak result for the COPC path covers only the successful path the
+  harness exercises. It is not a claim that COPC ingestion is leak-free in
+  general — `decompressChunk` also acquires before its `try`, so it leaks both
+  buffers if the `ChunkDecoder` constructor throws.
 
 Filing this mainly so it is on record for anyone else hitting memory growth with
 EPT data — no response needed.

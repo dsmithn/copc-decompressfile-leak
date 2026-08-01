@@ -74,9 +74,10 @@ decoder workers are pooled and there is no `.terminate()` call in its `src/`, so
 one instance serves a whole session. A Node process decoding many files in a loop
 behaves the same way.
 
-At 289 KB/tile that is ~7,400 decodes to a 2 GiB WASM ceiling (Emscripten's
-default growth limit for such builds), and ~5,570 to the 1,574,226 KiB the
-kernel recorded at the mobile kill below — a zero-baseline figure, since that
+At 289 KB/tile that is ~7,400 decodes to laz-perf's 2 GiB WASM ceiling (read
+from the binary: its memory section declares max 32768 pages = 2.00 GiB, and
+`lib/laz-perf.js` carries the matching `2147483648`), and ~5,570 to the
+1,574,226 KiB (1.50 GiB) the kernel recorded at the mobile kill below — a zero-baseline figure, since that
 number is total process RSS which this leak contributes to rather than fills.
 Both figures are arithmetic from the measured per-call leak, not observed
 crashes — **no Potree session was run to a memory ceiling.**
@@ -86,10 +87,11 @@ Potree**: a production viewer streaming USGS 3DEP EPT tiles died reproducibly on
 iPhone at ~267 s with kernel log
 `killing_highwater_process [WebKit.WebContent] 1574226KB`; the same build with
 the two frees added survived 988 s with no kills. That is one app's workload on a
-memory-constrained device, not a general severity claim — and the ~1.5 GB is
-total process RSS, which this leak contributes to rather than solely accounts
-for. It is included because the patched build ran 988 s where three unpatched runs
-died at 240, 263 and 267 s. That is strong evidence the leak is sufficient to
+memory-constrained device, not a general severity claim — and the figure is the
+process's physical footprint (what `killing_highwater_process` reports), which
+this leak contributes to rather than solely accounts for. It is included because
+the patched build ran 988 s against one paired unpatched run that died at 267 s,
+plus two earlier recordings of the same crash at 240 and 263 s. That is strong evidence the leak is sufficient to
 end a real session, not proof that it is the sole cause.
 
 Worth noting for anyone else hunting this: the page's own memory accounting read
