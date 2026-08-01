@@ -32,7 +32,7 @@ and in published `copc@0.0.8`.
 
 ## Reproduction
 
-Repro repo: **<LINK>** — two harnesses, both ~30 seconds.
+Repro repo: **https://github.com/dsmithn/copc-decompressfile-leak** — two harnesses, both ~30 seconds.
 
 **Node**, counting the allocator directly (`malloc` bytes minus `free` bytes)
 rather than heap size, so allocator growth policy can't explain the result. Arm A

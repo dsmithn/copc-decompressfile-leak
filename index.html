@@ -1,3 +1,10 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="A silent iPhone crash traced to two missing free() calls in copc.js, an open-source LiDAR decoder. 57.9 MB leaked per 200 tiles." />
+    <meta name="color-scheme" content="dark light" />
 <title>Two Missing free() Calls</title>
 
 <style>
@@ -254,7 +261,32 @@
     color: var(--muted);
     font-size: 0.85rem;
   }
+
+  /* Theme toggle. On the Artifact host the platform stamps data-theme itself;
+     on GitHub Pages nothing does, so the [data-theme] rules above would be dead
+     CSS without this. Default is the OS preference until the reader overrides. */
+  .theme {
+    position: fixed;
+    top: 1rem;
+    right: 1rem;
+    font-family: var(--mono);
+    font-size: 0.65rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--hairline);
+    padding: 0.45rem 0.7rem;
+    cursor: pointer;
+    z-index: 10;
+  }
+  .theme:hover, .theme:focus-visible { color: var(--text); border-color: var(--muted); }
+  .theme:focus-visible { outline: 2px solid var(--safe); outline-offset: 2px; }
+  @media print { .theme { display: none; } }
 </style>
+  </head>
+  <body>
+
 
 <div class="wrap">
   <header>
@@ -567,3 +599,23 @@ per call: 289,495 B leaked vs 289,466 B input
     <code>copc@0.0.8</code> and an unmodified <code>potree@1.8.0</code> checkout.
   </footer>
 </div>
+
+<button class="theme" type="button" aria-label="Toggle colour theme">theme</button>
+<script>
+  (function () {
+    var root = document.documentElement;
+    var saved = null;
+    try { saved = localStorage.getItem('theme'); } catch (e) {}
+    if (saved) root.setAttribute('data-theme', saved);
+    document.querySelector('.theme').addEventListener('click', function () {
+      var dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      var current = root.getAttribute('data-theme') || (dark ? 'dark' : 'light');
+      var next = current === 'dark' ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('theme', next); } catch (e) {}
+    });
+  })();
+</script>
+
+  </body>
+</html>
