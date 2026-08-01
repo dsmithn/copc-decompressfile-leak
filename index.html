@@ -266,6 +266,14 @@
         color: var(--muted);
         font-size: 0.85rem;
       }
+      a {
+        color: inherit;
+        text-decoration-color: var(--muted);
+        text-underline-offset: 0.2em;
+      }
+      a:hover {
+        text-decoration-color: currentColor;
+      }
 
       /* Theme toggle. On the Artifact host the platform stamps data-theme itself;
      on GitHub Pages nothing does, so the [data-theme] rules above would be dead
@@ -316,6 +324,12 @@
         </p>
       </header>
 
+      <p style="font-size: 0.85rem">
+        <a href="https://github.com/dsmithn/copc-decompressfile-leak">Reproduction repository</a>
+        ·
+        <a href="https://github.com/connormanning/copc.js/blob/dd667453809a76e5b885859782d1cbdeaf0501ec/src/las/point-data.ts#L36-L57">the function, pinned at <code>dd66745</code></a>
+      </p>
+
       <div class="confront">
         <div class="figure believed">
           <div class="n">108 MB</div>
@@ -323,7 +337,7 @@
         </div>
         <div class="versus">at the same instant</div>
         <div class="figure actual">
-          <div class="n">1,537 MB</div>
+          <div class="n">1,537 MiB</div>
           <div class="k">what the kernel recorded as it killed the tab</div>
         </div>
       </div>
@@ -358,12 +372,22 @@
           holding, and a WASM heap is neither of those things.
         </p>
         <p>
-          The obvious fallbacks don't help.
+          The browser's own APIs wouldn't have helped either.
           <code>performance.memory</code> reports only the JS heap, and WebKit
           doesn't implement it at all.
-          <code>measureUserAgentSpecificMemory()</code> does count WASM, but
-          it's Chromium-only and requires cross-origin isolation, which makes it
-          unavailable on precisely the browser that was crashing.
+          <code>measureUserAgentSpecificMemory()</code> can attribute memory
+          outside the JS heap, but it's Chromium-only and needs cross-origin
+          isolation, so it's unavailable on exactly the browser that was
+          crashing.
+        </p>
+        <p>
+          What <em>would</em> have found it is reading the WASM heap directly —
+          <code>Module.HEAPU8.length</code>, or the byte length of the module's
+          <code>WebAssembly.Memory</code>. That is one line, and the harness
+          further down this page ends up doing a stricter version of it. I
+          didn't reach for it because I was looking for a renderer bug, and the
+          decoder was a dependency I had never suspected. The instruments I
+          built were the ones that fit the theory I had.
         </p>
         <p class="callout">
           I spent a month improving two instruments that were pointed at the
@@ -433,7 +457,7 @@
               <tr>
                 <td>upstream (leaks)</td>
                 <td class="num">267 s</td>
-                <td class="died">killed — WebContent at 1,537 MB</td>
+                <td class="died">killed — WebContent at 1,537 MiB</td>
               </tr>
               <tr>
                 <td>with the two frees</td>
@@ -469,15 +493,18 @@
         <div class="scroll">
           <pre><span class="cmt">real USGS 3DEP tile, 289,466 B — 200 decodes</span>
 
+<span class="cmt">arm A — the real exported Las.PointData.decompressFile</span>
 upstream decompressFile    mallocs 400  frees   <span class="del">0</span>   leaked <span class="del">57,899,000 B</span>
+<span class="cmt">arm B — control: same routine reimplemented, two _free calls added</span>
 with the two _free calls   mallocs 400  frees <span class="add">400</span>   leaked <span class="add">         0 B</span>
 
 per call: 289,495 B leaked vs 289,466 B input
           <span class="cmt">difference 29 B = pointDataRecordLength, the second malloc</span></pre>
         </div>
         <p>
-          The leak per call is the input buffer plus one point record, landing
-          within 29 bytes of exactly the two allocations. Fragmentation doesn't
+          The leak per call is exactly the two allocations: 289,466 + 29 = 289,495
+          bytes, the input buffer plus one point record, with nothing
+          unaccounted for. Fragmentation doesn't
           produce four hundred mallocs and zero frees. The decoded output is
           byte-identical with the frees added, so nothing about the fix changes
           what the function returns.
@@ -489,8 +516,7 @@ per call: 289,495 B leaked vs 289,466 B input
           >
           Scaling it further is arithmetic, not measurement, and it assumes the
           leak is the only thing consuming the budget: about 7,400 decodes to
-          reach the 2&nbsp;GiB growth limit Emscripten builds use by default, or
-          5,400 to reach the ~1.5&nbsp;GB that ended the session above. That
+          reach the 2&nbsp;GiB growth limit Emscripten builds use by default, or about 5,570 to reach the 1,574,226&nbsp;KiB the kernel recorded above. That
           second figure is a zero-baseline number. The 1.5&nbsp;GB is total
           process RSS, which the leak contributes to rather than fills on its
           own, so a real session crosses it sooner.
@@ -658,16 +684,17 @@ per call: 289,495 B leaked vs 289,466 B input
       <hr class="rule" />
 
       <footer>
-        I root-caused this and fixed it in my own application, where a
-        988-second run afterwards produced no kill.
-        <strong>Nothing has been submitted upstream yet</strong> — no issue and
-        no PR, on copc.js or on any of the projects that call it. The Node
-        harness tests <code>copc@0.0.8</code>; the Chrome harness tests an
-        unmodified <code>potree@1.8.0</code> checkout.
+        I root-caused this and fixed it in my own application, where a 988-second
+        run afterwards produced no kill, against three unpatched runs that died
+        at 240, 263 and 267 seconds. The Node harness tests
+        <code>copc@0.0.8</code>; the Chrome harness tests an unmodified
+        <code>potree@1.8.0</code> checkout. Both are in the
+        <a href="https://github.com/dsmithn/copc-decompressfile-leak">reproduction repository</a>.
+        As of writing, nothing has been submitted upstream.
       </footer>
     </div>
 
-    <button class="theme" type="button" aria-label="Toggle colour theme">
+    <button class="theme" type="button" aria-label="Toggle theme" aria-pressed="false">
       theme
     </button>
     <script>
@@ -678,15 +705,26 @@ per call: 289,495 B leaked vs 289,466 B input
           saved = localStorage.getItem("theme");
         } catch (e) {}
         if (saved) root.setAttribute("data-theme", saved);
-        document.querySelector(".theme").addEventListener("click", function () {
+        var btn = document.querySelector(".theme");
+      btn.setAttribute(
+        "aria-pressed",
+        String(
+          (root.getAttribute("data-theme") ||
+            (window.matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light")) === "dark",
+        ),
+      );
+      btn.addEventListener("click", function () {
           var dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
           var current =
             root.getAttribute("data-theme") || (dark ? "dark" : "light");
           var next = current === "dark" ? "light" : "dark";
           root.setAttribute("data-theme", next);
-          try {
-            localStorage.setItem("theme", next);
-          } catch (e) {}
+        btn.setAttribute("aria-pressed", String(next === "dark"));
+        try {
+          localStorage.setItem("theme", next);
+        } catch (e) {}
         });
       })();
     </script>

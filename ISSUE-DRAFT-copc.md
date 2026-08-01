@@ -1,9 +1,3 @@
-# DRAFT — issue for connormanning/copc.js (not yet filed)
-
-**Title:** `Las.PointData.decompressFile` never frees its two WASM allocations
-
----
-
 `decompressFile` allocates two buffers and frees neither. `decompressChunk`, in
 the same file, frees both.
 
@@ -57,7 +51,7 @@ per call: 289495 B leaked vs 289466 B input
           (difference 29 B = pointDataRecordLength, the second _malloc)
 ```
 
-**200 tiles leak 57.9 MB.** The per-call figure is the input buffer plus one
+**200 decodes of this tile leak 57.9 MB.** The per-call figure is the input buffer plus one
 point record, to within 29 bytes — exactly the two allocations, and not something
 an allocator growth policy produces. Both arms decode byte-identical point data
 (asserted), so adding the frees changes nothing but the leak.
@@ -66,7 +60,8 @@ an allocator growth policy produces. Both arms decode byte-identical point data
 worker, unmodified: its EPT loader (`decompressFile`) leaks 5930 B/call while its
 COPC loader (`decompressChunk`) holds at exactly 0. Those two arms are different
 real call sites with different inputs (5894 vs 5089 B/call), so treat this as
-call-path confirmation; the Node run above is the controlled comparison.
+call-path confirmation; the Node run above is the controlled comparison. The
+5930 − 5894 = 36 B difference is that fixture's own `pointDataRecordLength`.
 
 ## Impact
 
@@ -76,8 +71,10 @@ decoder workers are pooled and there is no `.terminate()` call in its `src/`, so
 one instance serves a whole session. A Node process decoding many files in a loop
 behaves the same way.
 
-At 289 KB/tile that is ~7,400 tiles to a 2 GiB WASM ceiling, and ~5,400 to the
-~1.5 GB process budget that ended the mobile session below. **We did not run
+At 289 KB/tile that is ~7,400 decodes to a 2 GiB WASM ceiling (Emscripten's
+default growth limit for such builds), and ~5,570 to the 1,574,226 KiB the
+kernel recorded at the mobile kill below — a zero-baseline figure, since that
+number is total process RSS which this leak contributes to rather than fills. **We did not run
 Potree itself to failure**, so for any given viewer session that ceiling is
 arithmetic from the measured per-call figure, not an observed crash.
 
@@ -88,8 +85,9 @@ iPhone at ~267 s with kernel log
 the two frees added survived 988 s with no kills. That is one app's workload on a
 memory-constrained device, not a general severity claim — and the ~1.5 GB is
 total process RSS, which this leak contributes to rather than solely accounts
-for. It is included because it shows the leak is sufficient to end a real session
-and that the two frees are sufficient to prevent it.
+for. It is included because the patched build ran 988 s where three unpatched runs
+died at 240, 263 and 267 s. That is strong evidence the leak is sufficient to
+end a real session, not proof that it is the sole cause.
 
 Worth noting for anyone else hunting this: the page's own memory accounting read
 108 MB at the moment of that kill. WASM linear memory is neither a JS-heap
@@ -117,19 +115,29 @@ allocation nor a GPU one, so typical in-page instrumentation cannot see it.
    }
 ```
 
-Everything acquired is acquired _inside_ the `try`, so a failure of the second
-`_malloc` or of the `LASZip` constructor still releases whatever was obtained
-first. Typing and style are obviously yours to adjust — the shape is the point.
+Everything acquired is acquired _inside_ the `try`, so a throw from the
+`LASZip` constructor still releases whatever was obtained first. (Emscripten's
+`_malloc` returns 0 or aborts rather than throwing, so the constructor is the
+live path here.) Typing and style are obviously yours to adjust — the shape is the point.
 
-We applied exactly this to `copc@0.0.8`'s `lib/las/point-data.js` and re-ran the
-harness against the real exported `Las.PointData.decompressFile`:
+We applied the equivalent edit to `copc@0.0.8`'s built `lib/las/point-data.js`
+and re-ran against the real exported `Las.PointData.decompressFile`. **Note this
+run uses the small fixture at a higher iteration count**, not the 289 KB tile
+above — hence 4000 allocations rather than 400:
 
 ```
+fixture node.laz (5894 B)   iterations 2000
+
 upstream decompressFile (patched)   mallocs 4000  frees 4000   leaked 0 B
 output check: byte-identical point data
 ```
 
-Same 4000 allocations, all of them returned, decoded output unchanged.
+Every allocation returned, decoded output unchanged.
+
+Worth noting the same shape would help `decompressChunk`: it also allocates and
+constructs its decoder *before* its `try`, so it leaks both buffers if the
+`ChunkDecoder` constructor throws. It just doesn't leak on the path that
+succeeds, which is why only `decompressFile` shows up in measurement.
 
 One judgement call in there: the `finally` deletes the reader before freeing the
 buffer it was `open()`ed on. `decompressChunk` currently does the reverse. We did
@@ -137,7 +145,8 @@ not read laz-perf's destructor and cannot say whether it dereferences the buffer
 so this is a conservative ordering rather than a bug report about
 `decompressChunk`.
 
-`dataPointer` is a `pointDataRecordLength` scratch buffer (29 B for this file)
+`dataPointer` is a `pointDataRecordLength` scratch buffer (29 B for the 289 KB
+tile above; 36 B for the small fixture)
 that each point is copied _out_ of into `outBuffer`, so nothing in the returned
 data aliases either allocation — freeing them cannot affect the return value.
 Confirmed by the harness asserting byte-identical output.
