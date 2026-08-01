@@ -1,46 +1,43 @@
-# DRAFT — issue for potree/potree (not yet filed)
+Loading EPT data leaks WebAssembly memory on every decoded node. Loading COPC
+does not. The cause is in the bundled `libs/copc/index.js`, so it does not go
+away when copc.js publishes a fix — the vendored copy has to be updated.
 
-**Title:** EPT loader leaks WASM memory per node — bundled copc.js `decompressFile` never frees its two allocations
+## Where
 
----
-
-Potree's EPT loading path leaks WebAssembly memory on every decoded node. The
-COPC path does not. The cause is upstream in `copc.js`, but Potree bundles its
-own build of it, so an upstream release will not reach Potree without a bump
-here.
-
-`Las.PointData.decompressFile` `_malloc`s two buffers and frees neither.
-`decompressChunk`, in the same upstream file, frees both — which is why the two
-loaders behave differently:
+`src/workers/EptLaszipDecoderWorker.js:20-21` picks between the two functions:
 
 ```js
-// decompressChunk — frees both
-} finally {
-  LazPerf._free(blobPointer)
-  LazPerf._free(dataPointer)
-  decoder.delete()
-}
-
-// decompressFile — frees neither
-} finally {
-  reader.delete()
-}
+const buffer = isFullFile
+    ? await Copc.Las.PointData.decompressFile(u)      // EPT — leaks
+    : await Copc.Las.PointData.decompressChunk(...)   // COPC — does not
 ```
 
-Each call leaks `file.byteLength + pointDataRecordLength` bytes into the LazPerf
-instance.
+In the bundled build currently on `develop`, `decompressChunk` frees its two
+WASM allocations and `decompressFile` frees neither (deminified from
+`libs/copc/index.js`):
 
-## Why it accumulates rather than resetting
+```js
+// decompressChunk
+finally { o._free(u), o._free(c), l.delete() }
 
-Potree pools its decoder workers and there is no `.terminate()` call anywhere in
-`src/`, so one LazPerf instance serves an entire session. The leak tracks total
-bytes decoded for as long as the page is open, rather than being reclaimed per
-node.
+// decompressFile
+c = r._malloc(e.byteLength), l = r._malloc(s), d = new r.LASZip;
+try { ... } finally { d.delete() }
+```
 
-## Reproduction
+Each EPT node therefore leaves `file.byteLength + pointDataRecordLength` bytes
+allocated in the LazPerf instance.
 
-Measured in an unmodified `potree@1.8.0` checkout, using its own bundled copc
-build and its own decoder worker — no patches to Potree:
+## Why it accumulates instead of resetting
+
+Decoder workers are pooled and there is no `.terminate()` call in `src/`, so one
+LazPerf instance serves a whole session. The leak tracks total bytes decoded for
+as long as the page is open.
+
+## Replicating it
+
+Measured against an unmodified `potree@1.8.0` checkout, using its own bundled
+copc build and its own decoder worker — nothing patched:
 
 ```
 EPT loader  (decompressFile)   5930 B leaked per call
@@ -48,23 +45,30 @@ COPC loader (decompressChunk)      0 B leaked per call
 ```
 
 Harness and instructions: https://github.com/dsmithn/copc-decompressfile-leak
-(`potree-browser/`). It wraps `_malloc`/`_free` on the LazPerf instance and
+(see `potree-browser/`). It wraps `_malloc`/`_free` on the LazPerf instance and
 reports requested-minus-returned bytes, so allocator growth policy cannot
 account for the result.
 
 ## Fix
 
-The real fix is upstream — see <UPSTREAM_ISSUE_LINK>. Until a release lands,
-bumping or patching the bundled copc build is what would help Potree users.
+Reported upstream as https://github.com/connormanning/copc.js/issues/16, with a
+suggested patch. Since the build here is vendored, Potree would need the updated
+bundle regardless of what upstream releases.
+
+Happy to open a PR against `develop` bumping the bundled copc once upstream
+lands a fix — no build artifacts committed, no formatter run.
 
 ## What I did not verify
 
 - I did not run Potree to a crash. Only the leak and its accumulation were
-  measured. The out-of-memory failure that led me here was in a different
-  application that calls the same upstream function.
+  measured here. The out-of-memory failure that led me to this was in a
+  different application calling the same function.
 - The two arms above decoded different inputs (5,894 vs 5,089 B per call), so
-  treat this as confirmation that the leak occurs on a real Potree call path,
-  not as a controlled comparison. The controlled comparison is in the linked
-  repo's Node harness.
-- The 0-leak result for the COPC path covers the path this harness exercises. It
-  is not a claim that COPC ingestion is leak-free in general.
+  treat this as confirmation that the leak occurs on a real Potree call path
+  rather than as a controlled comparison. The controlled comparison is the Node
+  harness in the linked repo.
+- The 0-leak result for the COPC path covers only the path the harness
+  exercises. It is not a claim that COPC ingestion is leak-free in general.
+
+Filing this mainly so it is on record for anyone else hitting memory growth with
+EPT data — no response needed.
