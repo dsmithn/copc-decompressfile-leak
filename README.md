@@ -219,19 +219,29 @@ if `new LazPerf.LASZip()` throws, a naive "just add the frees" patch still leaks
 both pointers — the `finally` is not yet in scope. `decompressChunk` has the
 same shape and the same exposure.
 
-**Ordering — settled by reading the destructor (2026-08-04).** `decompressChunk`
-does the reverse of the sketch above: it `_free`s `blobPointer` and only then
-calls `decoder.delete()`, and
+**Ordering — largely settled by reading the destructors (2026-08-04).**
+`decompressChunk` does the reverse of the sketch above: it `_free`s
+`blobPointer` and only then calls `decoder.delete()`, and
 [copc.js#17](https://github.com/connormanning/copc.js/pull/17) adopts that same
 order in `decompressFile`. When this repro was filed we had not read laz-perf's
-teardown and flagged that order as unverified. It has now been read:
-`LASZip` holds a `shared_ptr<lazperf::reader::mem_file>`;
-[`mem_file::~mem_file()` is empty](https://github.com/hobuinc/laz-perf/blob/14522addcb01125499119990cc8fbc6b1e43b148/cpp/lazperf/readers.cpp#L435-L436),
-and its `Private` is a
-[`charbuf`](https://github.com/hobuinc/laz-perf/blob/14522addcb01125499119990cc8fbc6b1e43b148/cpp/lazperf/charbuf.hpp#L47-L48)
-— a `std::streambuf` view with no custom destructor — plus internal
-decompressor state. Nothing dereferences the `open()`ed buffer during
-destruction, so free-then-delete is safe.
+teardown and flagged that order as unverified. It has now been read **at the
+trees matching the shipped packages** — the 0.0.6-era
+([`601eefb`](https://github.com/hobuinc/laz-perf/blob/601eefbaccecf14c79bddc223d624f6eebd04d3e/cpp/lazperf/readers.cpp#L420-L421))
+and 0.0.7-era
+([`c9f2814`](https://github.com/hobuinc/laz-perf/blob/c9f281490c8ee05391a7ed2a5e16fe0ef2083c7a/cpp/lazperf/readers.cpp#L428-L429))
+commits, identical on current master: the binding's `LASZip` holds a
+`shared_ptr<lazperf::reader::mem_file>` and declares no destructor;
+`mem_file::~mem_file()` is empty; its `Private` holds a
+[`charbuf`](https://github.com/hobuinc/laz-perf/blob/601eefbaccecf14c79bddc223d624f6eebd04d3e/cpp/lazperf/charbuf.hpp#L47)
+— a `std::streambuf` view with no custom destructor — plus a `std::istream`.
+Not every inherited member's teardown was exhaustively traced (`InFileStream`,
+the decompressor, chunk vectors — internal state, characterized rather than
+traced), so read this as _the destructors we traced don't touch the input
+buffer_, not a formal proof. Note the benchmark cannot decide this question
+either way: WASM linear memory stays mapped after `_free`, so a hypothetical
+read-after-free in teardown would neither fault nor corrupt output already
+copied out. The source read is the evidence; `decompressChunk` shipping this
+order all along is the precedent.
 
 ---
 
@@ -329,15 +339,26 @@ repo root.)
 Measured 2026-08-04 (Node v26.3.0, macOS arm64), 289,466 B real-EPT-node
 fixture ×200 after the common 50-iteration warmup:
 
-| build                                    | leaked           | mallocs / frees |
-| ---------------------------------------- | ---------------- | --------------- |
-| `copc@0.0.8` (npm, as filed)             | 57,899,000 B     | 400 / 0         |
-| master @ `9f9e447` (PR parent, bundled)  | 57,899,000 B     | 400 / 0         |
-| PR #17 @ `60f1698` (bundled)             | **0 B**          | 400 / 400       |
+| build                                   | leaked       | mallocs / frees |
+| --------------------------------------- | ------------ | --------------- |
+| `copc@0.0.8` (npm, as filed)            | 57,899,000 B | 400 / 0         |
+| master @ `9f9e447` (PR parent, bundled) | 57,899,000 B | 400 / 0         |
+| PR #17 @ `60f1698` (bundled)            | **0 B**      | 400 / 400       |
 
 Small fixture ×2000: 0 B leaked, 4000 / 4000. Output byte-identical to the
 freeing mirror in every run. The parent-commit control pins the change to the
 PR's single commit rather than 0.0.8→master drift.
 
 On the fixed build the harness prints `VERDICT: no clear leak` and exits 1 —
-it is a leak *reproducer*, so failing to reproduce is the pass.
+it is a leak _reproducer_, so failing to reproduce is the pass.
+
+The leak harness asserts arm A ≡ arm B _within_ a run; `node/crossbuild-check.cjs`
+additionally compares arm A _across_ builds — `copc@0.0.8` vs the bundle —
+decoding the fixture once on each through one shared laz-perf instance:
+
+```sh
+COPC_MODULE=../copc-pr17.bundle.cjs node node/crossbuild-check.cjs ept-node-real.laz
+```
+
+Measured 2026-08-04: sha256-identical output
+(`45f46c85…c76f8d4a`, 1,137,003 B = the header's 39,207 points × 29 B records).
