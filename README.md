@@ -219,12 +219,19 @@ if `new LazPerf.LASZip()` throws, a naive "just add the frees" patch still leaks
 both pointers — the `finally` is not yet in scope. `decompressChunk` has the
 same shape and the same exposure.
 
-**Delete before freeing.** `decompressChunk` does the reverse: it `_free`s
-`blobPointer` and only then calls `decoder.delete()`, while the decoder was
-`open()`ed on that pointer. Whether that actually dereferences the buffer
-depends on laz-perf's destructor, which we did not read and neither harness
-exercises — so treat this as _unsafe ordering by construction, not a confirmed
-use-after-free_. The fix above avoids the question by deleting first.
+**Ordering — settled by reading the destructor (2026-08-04).** `decompressChunk`
+does the reverse of the sketch above: it `_free`s `blobPointer` and only then
+calls `decoder.delete()`, and
+[copc.js#17](https://github.com/connormanning/copc.js/pull/17) adopts that same
+order in `decompressFile`. When this repro was filed we had not read laz-perf's
+teardown and flagged that order as unverified. It has now been read:
+`LASZip` holds a `shared_ptr<lazperf::reader::mem_file>`;
+[`mem_file::~mem_file()` is empty](https://github.com/hobuinc/laz-perf/blob/14522addcb01125499119990cc8fbc6b1e43b148/cpp/lazperf/readers.cpp#L435-L436),
+and its `Private` is a
+[`charbuf`](https://github.com/hobuinc/laz-perf/blob/14522addcb01125499119990cc8fbc6b1e43b148/cpp/lazperf/charbuf.hpp#L47-L48)
+— a `std::streambuf` view with no custom destructor — plus internal
+decompressor state. Nothing dereferences the `open()`ed buffer during
+destruction, so free-then-delete is safe.
 
 ---
 
@@ -296,3 +303,41 @@ modes a reader should check for:
   comparison, so it cannot manufacture a difference — it can only _under_-report
   the leaking arm, since the warmup's own leaked bytes sit outside the measured
   window.
+
+---
+
+## Verifying the fix — copc.js PR #17
+
+[copc.js#17](https://github.com/connormanning/copc.js/pull/17) applies the fix.
+Master's built `lib/` has moved to ESM with extensionless relative imports,
+which plain Node cannot resolve — so the branch is bundled first. `laz-perf`
+stays external so the harness's instrumented instance is still the allocator
+being measured (pinned at 0.0.6 across all arms):
+
+```sh
+git clone https://github.com/connormanning/copc.js ../copc.js
+cd ../copc.js && gh pr checkout 17 && npm install && npm run build
+npx esbuild lib/index.js --bundle --format=cjs --platform=node \
+  --external:laz-perf --outfile=../copc-decompressfile-leak/copc-pr17.bundle.cjs
+cd ../copc-decompressfile-leak
+COPC_MODULE=../copc-pr17.bundle.cjs node node/copc-leak-repro.cjs ept-node-real.laz 200
+```
+
+(`COPC_MODULE` is resolved from `node/`, so `../copc-pr17.bundle.cjs` is the
+repo root.)
+
+Measured 2026-08-04 (Node v26.3.0, macOS arm64), 289,466 B real-EPT-node
+fixture ×200 after the common 50-iteration warmup:
+
+| build                                    | leaked           | mallocs / frees |
+| ---------------------------------------- | ---------------- | --------------- |
+| `copc@0.0.8` (npm, as filed)             | 57,899,000 B     | 400 / 0         |
+| master @ `9f9e447` (PR parent, bundled)  | 57,899,000 B     | 400 / 0         |
+| PR #17 @ `60f1698` (bundled)             | **0 B**          | 400 / 400       |
+
+Small fixture ×2000: 0 B leaked, 4000 / 4000. Output byte-identical to the
+freeing mirror in every run. The parent-commit control pins the change to the
+PR's single commit rather than 0.0.8→master drift.
+
+On the fixed build the harness prints `VERDICT: no clear leak` and exits 1 —
+it is a leak *reproducer*, so failing to reproduce is the pass.

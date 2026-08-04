@@ -13,7 +13,9 @@
 
 const fs = require('node:fs')
 const assert = require('node:assert')
-const { Las } = require('copc')
+// COPC_MODULE points arm A at a different copc build (e.g. a bundled PR
+// branch) without touching the measurement. Default: the npm install.
+const { Las } = require(process.env.COPC_MODULE || 'copc')
 const { createLazPerf } = require('laz-perf')
 
 const FILE = process.argv[2]
